@@ -1,14 +1,13 @@
 package appattest_test
 
-// this file is voluntarily in another package so it cannot rely on private members
-
 import (
 	"crypto/sha256"
 	"encoding/base64"
 	"testing"
 	"time"
 
-	appattest "github.com/predicat-inc/go-app-attest"
+	"github.com/predicat-inc/go-app-attest/appattest"
+	"github.com/predicat-inc/go-app-attest/authenticatordata"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -27,9 +26,9 @@ func TestAppAttest(t *testing.T) {
 	require.NoError(t, err)
 
 	attestor, err := appattest.New(
+		[][]byte{appIDHash},
 		appattest.WithNowFn(nowFn),
-		appattest.WithBundleIDHash(appIDHash),
-		appattest.WithEnvironment(appattest.EnvironmentProd),
+		appattest.WithEnvironments([]appattest.Environment{appattest.AAGUIDProd}),
 	)
 	require.NoError(t, err)
 
@@ -41,14 +40,14 @@ func TestAppAttest(t *testing.T) {
 	keyIdentifier, err := base64.StdEncoding.AppendDecode(nil, []byte("bSrEhF8TIzIvWSPwvZ0i2+UOBre4ASH84rK15m6emNY="))
 	require.NoError(t, err)
 
-	req := appattest.Input{
+	req := appattest.AttestInput{
 		ServerChallenge: []byte("test_server_challenge"),
 		AttestationCBOR: attestationCBOR,
 		KeyIdentifier:   keyIdentifier,
 	}
 
-	res := attestor.Attest(&req)
-	require.NoError(t, res.Err)
+	res, err := attestor.Attest(&req)
+	require.NoError(t, err)
 	assert.Equal(t, uint32(0), res.AuthenticatorData.SignCount)
 }
 
@@ -66,9 +65,9 @@ func TestAppAttestDev(t *testing.T) {
 	require.NoError(t, err)
 
 	attestor, err := appattest.New(
+		[][]byte{bundleIDHash},
 		appattest.WithNowFn(nowFn),
-		appattest.WithBundleIDHash(bundleIDHash),
-		appattest.WithEnvironment(appattest.EnvironmentDev),
+		appattest.WithEnvironments([]appattest.Environment{appattest.AAGUIDDev}),
 	)
 	require.NoError(t, err)
 
@@ -81,14 +80,14 @@ func TestAppAttestDev(t *testing.T) {
 	require.NoError(t, err)
 
 	chalSum := sha256.Sum256([]byte("server_challenge"))
-	req := appattest.Input{
+	req := appattest.AttestInput{
 		ServerChallenge: chalSum[:],
 		AttestationCBOR: attestationCBOR,
 		KeyIdentifier:   keyIdentifier,
 	}
 
-	res := attestor.Attest(&req)
-	require.NoError(t, res.Err)
+	res, err := attestor.Attest(&req)
+	require.NoError(t, err)
 	assert.Equal(t, uint32(0), res.AuthenticatorData.SignCount)
 }
 
@@ -119,9 +118,9 @@ func FuzzAttestationData(f *testing.F) {
 	require.NoError(f, err)
 
 	attestor, err := appattest.New(
+		[][]byte{bundleIDHash},
 		appattest.WithNowFn(nowFn),
-		appattest.WithBundleIDHash(bundleIDHash),
-		appattest.WithEnvironment(appattest.EnvironmentDev),
+		appattest.WithEnvironments([]appattest.Environment{appattest.AAGUIDDev}),
 	)
 	require.NoError(f, err)
 
@@ -129,8 +128,8 @@ func FuzzAttestationData(f *testing.F) {
 	keyIdentifier, err := base64.StdEncoding.AppendDecode(nil, []byte("B3hMn1CG/4of7s+TUkKLrS/6FAxsGft2N6PJhrzXI4E="))
 	require.NoError(f, err)
 
-	out := appattest.AuthenticatorData{}
-	req := appattest.Input{
+	out := authenticatordata.T{}
+	req := appattest.AttestInput{
 		ServerChallenge:      chalSum[:],
 		KeyIdentifier:        keyIdentifier,
 		OutAuthenticatorData: &out,
@@ -139,7 +138,7 @@ func FuzzAttestationData(f *testing.F) {
 	f.Fuzz(func(t *testing.T, attestorData []byte) {
 		req.AttestationCBOR = attestorData // fuzzer will provide the input
 		startTime := time.Now()
-		_ = attestor.Attest(&req)
+		_, _ = attestor.Attest(&req)
 
 		// verifying should be a relatively fast operation
 		if time.Since(startTime) > 100*time.Millisecond {

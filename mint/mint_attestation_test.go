@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	appattest "github.com/predicat-inc/go-app-attest"
+	appattest "github.com/predicat-inc/go-app-attest/appattest"
 	"github.com/predicat-inc/go-app-attest/mint"
 	"github.com/stretchr/testify/require"
 )
@@ -17,22 +17,19 @@ import (
 func TestMint(t *testing.T) {
 	appIDDigest := sha256.Sum256([]byte("myapp"))
 
-	cader, capriv, err := generateCACert("mock ca")
+	mintctx, err := mint.NewMintContext()
 	require.NoError(t, err)
 
-	intder, intpriv, err := generateIntermediateCert("mock intermediate", cader, capriv)
-	require.NoError(t, err)
-
-	intCert, err := x509.ParseCertificate(intder)
+	intCert, err := x509.ParseCertificate(mintctx.IntCertDer)
 	require.NoError(t, err)
 
 	attKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	require.NoError(t, err)
 
-	mintout := mint.Mint(&mint.Input{
-		IntermediatesDER:  [][]byte{intder},
+	mintout, err := mint.AttestKey(&mint.AttestInput{
+		IntermediatesDER:  [][]byte{mintctx.IntCertDer},
 		IssuerCertificate: intCert,
-		IssuerKey:         intpriv,
+		IssuerKey:         mintctx.IntKey,
 		AttestedKey:       &attKey.PublicKey,
 		AAGUID:            appattest.AAGUIDDev,
 
@@ -42,25 +39,26 @@ func TestMint(t *testing.T) {
 		BundleIDHash:    appIDDigest[:],
 		ServerChallenge: []byte("server data"),
 	})
-	require.NoError(t, mintout.Err)
+	require.NoError(t, err)
 
-	caCert, err := x509.ParseCertificate(cader)
+	caCert, err := x509.ParseCertificate(mintctx.CACertDer)
 	require.NoError(t, err)
 
 	keyid := appattest.ComputeKeyHash(&attKey.PublicKey)
 
 	caPool := x509.NewCertPool()
 	caPool.AddCert(caCert)
-	attestout := appattest.SubtleAttest(&appattest.SubtleAttestInput{
-		AttestationInput: &appattest.Input{
+
+	_, err = appattest.SubtleAttest(&appattest.SubtleAttestInput{
+		AttestationInput: &appattest.AttestInput{
 			ServerChallenge: []byte("server data"),
 			AttestationCBOR: mintout.Attestation,
 			KeyIdentifier:   keyid[:],
 		},
-		BundleIDHash:   appIDDigest[:],
-		ExpectedAAGUID: appattest.AAGUIDDev,
-		Time:           time.Now(),
-		AARoots:        caPool,
+		BundleIDHashes:  [][]byte{appIDDigest[:]},
+		ExpectedAAGUIDs: []appattest.Environment{appattest.AAGUIDDev},
+		Time:            time.Now(),
+		AARoots:         caPool,
 	})
-	require.NoError(t, attestout.Err)
+	require.NoError(t, err)
 }

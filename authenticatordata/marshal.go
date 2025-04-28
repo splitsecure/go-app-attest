@@ -1,14 +1,13 @@
-package mint
+package authenticatordata
 
 import (
 	"encoding/binary"
 	"fmt"
 
 	"github.com/fxamacker/cbor/v2"
-	appattest "github.com/predicat-inc/go-app-attest"
 )
 
-func MarhsalAuthenticatorData(ad *appattest.AuthenticatorData) ([]byte, error) {
+func Marshal(ad *T) ([]byte, error) {
 	if ad == nil {
 		return nil, fmt.Errorf("AuthenticatorData pointer is nil")
 	}
@@ -30,7 +29,7 @@ func MarhsalAuthenticatorData(ad *appattest.AuthenticatorData) ([]byte, error) {
 	adb = append(adb, signCountBytes...)
 
 	// Serialize AttestedCredentialData if the flag is set
-	if ad.Flags&appattest.ADF_HAS_ATTESTED_CREDENTIAL_DATA != 0 {
+	if ad.Flags&ADF_HAS_ATTESTED_CREDENTIAL_DATA != 0 {
 		err := marshalAttestedCredentialData(&ad.AttestedCredentialData, &adb)
 		if err != nil {
 			return nil, fmt.Errorf("failed to serialize AttestedCredentialData: %w", err)
@@ -41,7 +40,7 @@ func MarhsalAuthenticatorData(ad *appattest.AuthenticatorData) ([]byte, error) {
 	return adb, nil
 }
 
-func marshalAttestedCredentialData(acd *appattest.AttestedCredentialData, dst *[]byte) error {
+func marshalAttestedCredentialData(acd *AttestedCredentialData, dst *[]byte) error {
 
 	// Serialize AAGUID (must be 16 bytes)
 	if len(acd.AAGUID) != 16 {

@@ -24,10 +24,10 @@ oyFraWVIyd/dganmrduC1bmTBGwD
 -----END CERTIFICATE-----`
 
 type AttestorImpl struct {
-	aaroots              *x509.CertPool
-	nowfn                func() time.Time
-	expectedAAGUID       []byte
-	expectedBundleIDHash []byte
+	aaroots                *x509.CertPool
+	nowfn                  func() time.Time
+	expectedAAGUIDs        []Environment
+	expectedBundleIDHashes [][]byte
 }
 
 type optionsState struct {
@@ -38,7 +38,7 @@ type optionsState struct {
 	bundleIDHash []byte
 
 	// defaults to prod
-	environment Environment
+	environments []Environment
 }
 
 type option struct {
@@ -51,16 +51,9 @@ func newoption(fn func(*optionsState)) option {
 	}
 }
 
-func WithEnvironment(env Environment) option {
+func WithEnvironments(env []Environment) option {
 	return newoption(func(os *optionsState) {
-		os.environment = env
-	})
-}
-
-// WithConstructInto lets the user provide a zero struct for initialization.
-func WithConstructInto(into *AttestorImpl) option {
-	return newoption(func(s *optionsState) {
-		s.into = into
+		os.environments = env
 	})
 }
 
@@ -77,25 +70,18 @@ func WithNowFn(now func() time.Time) option {
 	})
 }
 
-func WithBundleIDHash(hash []byte) option {
-	return newoption(func(os *optionsState) {
-		os.bundleIDHash = hash
-	})
-}
+func New(
+	bundleIDHashes [][]byte,
+	options ...option,
+) (*AttestorImpl, error) {
 
-func New(options ...option) (*AttestorImpl, error) {
+	att := &AttestorImpl{}
+
 	optionsState := optionsState{}
 
+	// compute the options state from the provided options
 	for _, option := range options {
 		option.apply(&optionsState)
-	}
-
-	// determine instanstiation destination
-	var att *AttestorImpl
-	if optionsState.into == nil {
-		att = &AttestorImpl{}
-	} else {
-		att = optionsState.into
 	}
 
 	// determine pool
@@ -117,34 +103,31 @@ func New(options ...option) (*AttestorImpl, error) {
 		att.nowfn = optionsState.nowfn
 	}
 
-	// determine expected AAGUID
-	switch optionsState.environment {
-	case EnvironmentProd:
-		att.expectedAAGUID = AAGUIDProd
-	case EnvironmentDev:
-		att.expectedAAGUID = AAGUIDDev
-	default:
-		return nil, fmt.Errorf("unknown environment %v", optionsState.environment)
+	// set expected AAGUID
+	if len(optionsState.environments) == 0 {
+		att.expectedAAGUIDs = []Environment{AAGUIDProd}
+	} else {
+		att.expectedAAGUIDs = optionsState.environments
 	}
 
 	// determine bundle id hash
-	if optionsState.bundleIDHash == nil {
+	if len(bundleIDHashes) == 0 {
 		return nil, fmt.Errorf("bundle id hash must be provided")
 	} else {
-		att.expectedBundleIDHash = optionsState.bundleIDHash
+		att.expectedBundleIDHashes = bundleIDHashes
 	}
 
 	return att, nil
 }
 
-func (at *AttestorImpl) Attest(in *Input) Output {
+func (at *AttestorImpl) Attest(in *AttestInput) (AttestOutput, error) {
 	subtleIn := SubtleAttestInput{
 		AttestationInput: in,
 
-		BundleIDHash:   at.expectedBundleIDHash,
-		Time:           at.nowfn(),
-		ExpectedAAGUID: at.expectedAAGUID,
-		AARoots:        at.aaroots,
+		BundleIDHashes:  at.expectedBundleIDHashes,
+		Time:            at.nowfn(),
+		ExpectedAAGUIDs: at.expectedAAGUIDs,
+		AARoots:         at.aaroots,
 	}
 	return SubtleAttest(&subtleIn)
 }

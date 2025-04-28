@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"crypto/x509"
 	"encoding/asn1"
+	"encoding/hex"
 	"fmt"
 	"reflect"
 	"slices"
@@ -13,6 +14,7 @@ import (
 
 	"github.com/fxamacker/cbor/v2"
 	"github.com/pkg/errors"
+	"github.com/predicat-inc/go-app-attest/authenticatordata"
 )
 
 const (
@@ -20,104 +22,122 @@ const (
 )
 
 type SubtleAttestInput struct {
-	AttestationInput *Input
+	AttestationInput *AttestInput
 	Time             time.Time
-	BundleIDHash     []byte
+	BundleIDHashes   [][]byte
 
-	ExpectedAAGUID []byte
-	AARoots        *x509.CertPool
+	ExpectedAAGUIDs []Environment
+	AARoots         *x509.CertPool
 }
 
-// SubtleAttest is allows you to perform attestation without the guardrails provided by AppAttestImpl.
-func SubtleAttest(in *SubtleAttestInput) Output {
+// SubtleAttest performs attestation without the guardrails provided by AppAttestImpl.
+func SubtleAttest(in *SubtleAttestInput) (AttestOutput, error) {
 	// unmarshal the attestation object
 	attestObj := AttestationObject{}
 	err := cbor.Unmarshal(in.AttestationInput.AttestationCBOR, &attestObj)
 	if err != nil {
-		return Output{Err: errors.Wrap(err, "unmarshalling attestation object")}
+		return AttestOutput{}, fmt.Errorf("unmarshalling attestation object: %w", err)
 	}
 
 	// ensure format is correct
 	if attestObj.Format != Format {
-		return Output{Err: fmt.Errorf("attestation object format mismatch: expected '%s', got '%s'", Format, attestObj.Format)}
+		return AttestOutput{}, fmt.Errorf("attestation object format mismatch: expected '%s', got '%s'", Format, attestObj.Format)
 	}
 
 	// create a new cert verifier using the intermediates provided in the attestation object
 	verifyOpts := x509.VerifyOptions{}
 	if err := populateVerifyOpts(&verifyOpts, &attestObj, in.AARoots); err != nil {
-		return Output{Err: errors.Wrap(err, "populating verify opts")}
+		return AttestOutput{}, fmt.Errorf("populating verify opts: %w", err)
 	}
 	verifyOpts.CurrentTime = in.Time
 
 	// parse the leaf certificate
 	leafCert, err := x509.ParseCertificate(attestObj.AttestationStatement.X509CertChain[0])
 	if err != nil {
-		return Output{Err: errors.Wrap(err, "parsing leaf certificate")}
+		return AttestOutput{}, fmt.Errorf("parsing leaf certificate: %w", err)
 	}
 
 	// verify the leaf certificate
 	_, err = leafCert.Verify(verifyOpts)
 	if err != nil {
-		return Output{Err: errors.Wrap(err, "verifying leaf certificate")}
+		return AttestOutput{}, fmt.Errorf("verifying leaf certificate: %w", err)
 	}
 
 	// > 2. Create clientDataHash as the SHA256 hash of the one-time challenge your server sends
 	// > to your app before performing the attestation,
 	// > and append that hash to the end of the authenticator data (authData from the decoded object).
 	// > 3. Generate a new SHA256 hash of the composite item to create nonce.
-	nonce, err := ComputeNonce(attestObj.AuthData, in.AttestationInput.ServerChallenge)
+
+	//clientDataHash := sha256.Sum256(in.AttestationInput.ServerChallenge)
+	clientDataHash := in.AttestationInput.ServerChallenge
+
+	nonce, err := ComputeNonce(attestObj.AuthData, clientDataHash[:])
 	if err != nil {
-		return Output{Err: errors.Wrap(err, "computing nonce")}
+		return AttestOutput{}, fmt.Errorf("computing nonce: %w", err)
 	}
 
 	nonceFromCert, err := extractNonceFromCert(leafCert)
 	if err != nil {
-		return Output{Err: errors.Wrap(err, "extracting nonce from leaf certificate")}
+		return AttestOutput{}, fmt.Errorf("extracting nonce from leaf certificate: %w", err)
 	}
 
 	if !bytes.Equal(nonceFromCert, nonce[:]) {
-		return Output{Err: errors.New("nonce from cert did not match computed nonce")}
+		return AttestOutput{}, fmt.Errorf("nonce from cert did not match computed nonce: %s != %s", hex.EncodeToString(nonceFromCert), hex.EncodeToString(nonce[:]))
 	}
 
 	certPubKey, ok := leafCert.PublicKey.(*ecdsa.PublicKey)
 	if !ok {
-		return Output{Err: fmt.Errorf("downcasting pubkey: unexpected type '%s'", reflect.TypeOf(leafCert.PublicKey))}
+		return AttestOutput{}, fmt.Errorf("downcasting pubkey: unexpected type '%s'", reflect.TypeOf(leafCert.PublicKey))
 	}
 
 	computedPubkeyHash := ComputeKeyHash(certPubKey)
 
 	// assert that the public key of the leaf certificate matches the key handle returned by the app
 	if !bytes.Equal(in.AttestationInput.KeyIdentifier, computedPubkeyHash[:]) {
-		return Output{Err: errors.New("key identifier did not match public key of leaf certificate")}
+		return AttestOutput{}, fmt.Errorf("key identifier did not match public key of leaf certificate: %s != %s", hex.EncodeToString(computedPubkeyHash[:]), hex.EncodeToString(in.AttestationInput.KeyIdentifier))
 	}
 
 	authenticatorData := in.AttestationInput.OutAuthenticatorData
 	if authenticatorData == nil {
-		authenticatorData = &AuthenticatorData{}
+		authenticatorData = &authenticatordata.T{}
 	}
 
-	if err = UnmarshalIntoAuthenticatorData(attestObj.AuthData, authenticatorData); err != nil {
-		return Output{Err: errors.Wrap(err, "unmarshalling authenticator data")}
+	if err = authenticatordata.Unmarshal(attestObj.AuthData, authenticatorData); err != nil {
+		return AttestOutput{}, errors.Wrap(err, "unmarshalling authenticator data")
 	}
 
-	if !bytes.Equal(authenticatorData.RelayingPartyHash, in.BundleIDHash) {
-		return Output{Err: errors.New("app id hash did not match relaying party hash")}
+	bundleIDHashOk := false
+	for _, bundleIDHash := range in.BundleIDHashes {
+		if bytes.Equal(bundleIDHash, authenticatorData.RelayingPartyHash) {
+			bundleIDHashOk = true
+			break
+		}
+	}
+	if !bundleIDHashOk {
+		return AttestOutput{}, fmt.Errorf("app id hash did not match expected app ids: %q", hex.EncodeToString(authenticatorData.RelayingPartyHash))
 	}
 
 	// ensure that AAGUID is correct
-	if !bytes.Equal(in.ExpectedAAGUID, authenticatorData.AttestedCredentialData.AAGUID) {
-		return Output{Err: errors.New("aaguid did not match - this attestation might have been generated for a different environment")}
+	aaguidOk := false
+	for _, aaguid := range in.ExpectedAAGUIDs {
+		if bytes.Equal(aaguid, authenticatorData.AttestedCredentialData.AAGUID) {
+			aaguidOk = true
+			break
+		}
+	}
+	if !aaguidOk {
+		return AttestOutput{}, fmt.Errorf("aaguid did not match expected aaguids: %q", hex.EncodeToString(authenticatorData.AttestedCredentialData.AAGUID))
 	}
 
 	// > 9. Verify that the authenticator data’s credentialId field is the same as the key identifier.
 	if !bytes.Equal(in.AttestationInput.KeyIdentifier, authenticatorData.AttestedCredentialData.CredentialID) {
-		return Output{Err: errors.New("key identifier did not match attested credential id of authenticator data")}
+		return AttestOutput{}, fmt.Errorf("key identifier did not match attested credential id of authenticator data")
 	}
 
-	return Output{
+	return AttestOutput{
 		AuthenticatorData: authenticatorData,
 		LeafCert:          leafCert,
-	}
+	}, nil
 }
 
 func populateVerifyOpts(dst *x509.VerifyOptions, attObj *AttestationObject, aaroots *x509.CertPool) (err error) {
@@ -188,17 +208,14 @@ func ellipticPointToX962Uncompressed(pub *ecdsa.PublicKey) []byte {
 	return x962Bytes
 }
 
-func ComputeNonce(authData, serverChallenge []byte) (res [sha256.Size]byte, err error) {
+func ComputeNonce(authData, clientDataHash []byte) (res [sha256.Size]byte, err error) {
 	nonceDigest := sha256.New()
 	if _, err = nonceDigest.Write(authData); err != nil {
 		err = errors.Wrap(err, "writing auth data to digest")
 		return
 	}
 
-	// Heads up: this deviates from what the documentation says. The documentation says to append the checksum of the server challenge to the auth data
-	// but in practice it appends the server challenge itself to the auth data.
-	// I figured it out by comparing the expected values against the implementation-generated values.
-	if _, err = nonceDigest.Write(serverChallenge); err != nil {
+	if _, err = nonceDigest.Write(clientDataHash); err != nil {
 		err = errors.Wrap(err, "writing challenge checksum to digest")
 		return
 	}
@@ -211,15 +228,10 @@ func ComputeKeyHash(key *ecdsa.PublicKey) [sha256.Size]byte {
 	return sha256.Sum256(ellipticPointToX962Uncompressed(key))
 }
 
+type Environment = []byte
+
 var (
 	NonceOID   = asn1.ObjectIdentifier{1, 2, 840, 113635, 100, 8, 2}
-	AAGUIDProd = []byte("appattest\x00\x00\x00\x00\x00\x00\x00")
-	AAGUIDDev  = []byte("appattestdevelop")
+	AAGUIDProd = Environment("appattest\x00\x00\x00\x00\x00\x00\x00")
+	AAGUIDDev  = Environment("appattestdevelop")
 )
-
-func init() {
-	var err error
-	if err != nil {
-		panic(err)
-	}
-}

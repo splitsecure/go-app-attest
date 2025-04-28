@@ -10,12 +10,13 @@ import (
 	"time"
 
 	"github.com/fxamacker/cbor/v2"
-	appattest "github.com/predicat-inc/go-app-attest"
+	"github.com/predicat-inc/go-app-attest/appattest"
+	"github.com/predicat-inc/go-app-attest/authenticatordata"
 )
 
 // This package provides an API for minting attestation documents.
 
-type Input struct {
+type AttestInput struct {
 	IntermediatesDER  [][]byte
 	IssuerCertificate *x509.Certificate
 	IssuerKey         *ecdsa.PrivateKey
@@ -28,47 +29,51 @@ type Input struct {
 	ServerChallenge []byte
 	BundleIDHash    []byte
 
+	SignCount uint32
+
 	// MutateLeaf provides the caller with an opportunity to modify the certificate template before
 	// it is processed.
 	MutateLeafTemplate func(*x509.Certificate)
 }
 
-type Output struct {
-	Err         error
+type AttestOutput struct {
 	Attestation []byte
 }
 
-func Mint(input *Input) Output {
+func AttestKey(input *AttestInput) (AttestOutput, error) {
 
 	// compute the key hash
 	keyIdentifier := appattest.ComputeKeyHash(input.AttestedKey)
 
 	// build and marshal the authenticator data
-	ad := appattest.AuthenticatorData{
+	ad := authenticatordata.T{
 		RelayingPartyHash: input.BundleIDHash,
-		SignCount:         3,
-		Flags:             appattest.ADF_HAS_ATTESTED_CREDENTIAL_DATA,
-		AttestedCredentialData: appattest.AttestedCredentialData{
+		SignCount:         input.SignCount,
+		Flags:             authenticatordata.ADF_HAS_ATTESTED_CREDENTIAL_DATA,
+		AttestedCredentialData: authenticatordata.AttestedCredentialData{
 			AAGUID:       input.AAGUID,
 			CredentialID: keyIdentifier[:],
 		},
 	}
 
-	adb, err := MarhsalAuthenticatorData(&ad)
+	adb, err := authenticatordata.Marshal(&ad)
 	if err != nil {
-		return Output{Err: err}
+		return AttestOutput{}, err
 	}
+
+	// serverChallengeDigest := sha256.Sum256(input.ServerChallenge)
 
 	// compute rawnonce which will be put in an ASN.1 container
 	rawnonce, err := appattest.ComputeNonce(adb, input.ServerChallenge)
+	//rawnonce, err := appattest.ComputeNonce(adb, serverChallengeDigest[:])
 	if err != nil {
-		return Output{Err: err}
+		return AttestOutput{}, err
 	}
 
 	// nonce is an asn.1 container containing the computed nonce
 	nonce, err := asn1.Marshal(appattest.ASN1AANonceContainer{Nonce: rawnonce[:]})
 	if err != nil {
-		return Output{Err: err}
+		return AttestOutput{}, err
 	}
 
 	// mint the leaf certificate
@@ -89,7 +94,7 @@ func Mint(input *Input) Output {
 		input.MutateLeafTemplate,
 	)
 	if err != nil {
-		return Output{Err: err}
+		return AttestOutput{}, err
 	}
 
 	x5c := make([][]byte, 1+len(input.IntermediatesDER))
@@ -112,12 +117,12 @@ func Mint(input *Input) Output {
 	// marshal the attestation object
 	aob, err := cbor.Marshal(ao)
 	if err != nil {
-		return Output{Err: err}
+		return AttestOutput{}, err
 	}
 
-	return Output{
+	return AttestOutput{
 		Attestation: aob,
-	}
+	}, nil
 }
 
 func generateLeafCert(
