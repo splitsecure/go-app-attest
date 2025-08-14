@@ -2,10 +2,10 @@ package appattest
 
 import (
 	"crypto/x509"
-	"fmt"
 	"time"
 
 	"github.com/pkg/errors"
+	"github.com/predicat-inc/go-app-attest/authenticatordata"
 )
 
 const appattestRootCAPEM = `-----BEGIN CERTIFICATE-----
@@ -23,11 +23,13 @@ CgYIKoZIzj0EAwMDaAAwZQIwQgFGnByvsiVbpTKwSga0kP0e8EeDS4+sQmTvb7vn
 oyFraWVIyd/dganmrduC1bmTBGwD
 -----END CERTIFICATE-----`
 
+type Attestor interface {
+	VerifyAttestation(*VerifyAttestationInput) (VerifyAttestationOutput, error)
+}
+
 type AttestorImpl struct {
-	aaroots                *x509.CertPool
-	nowfn                  func() time.Time
-	expectedAAGUIDs        []Environment
-	expectedBundleIDHashes [][]byte
+	aaroots *x509.CertPool
+	nowfn   func() time.Time
 }
 
 type optionsState struct {
@@ -51,12 +53,6 @@ func newoption(fn func(*optionsState)) option {
 	}
 }
 
-func WithEnvironments(env []Environment) option {
-	return newoption(func(os *optionsState) {
-		os.environments = env
-	})
-}
-
 // WithAppAttestRoots lets the user provide its own authoritative certs pool
 func WithAppAttestRoots(pool *x509.CertPool) option {
 	return newoption(func(s *optionsState) {
@@ -64,6 +60,7 @@ func WithAppAttestRoots(pool *x509.CertPool) option {
 	})
 }
 
+// WithNowFn lets the user provide its own time.Now function
 func WithNowFn(now func() time.Time) option {
 	return newoption(func(os *optionsState) {
 		os.nowfn = now
@@ -71,10 +68,8 @@ func WithNowFn(now func() time.Time) option {
 }
 
 func New(
-	bundleIDHashes [][]byte,
 	options ...option,
 ) (*AttestorImpl, error) {
-
 	att := &AttestorImpl{}
 
 	optionsState := optionsState{}
@@ -103,31 +98,22 @@ func New(
 		att.nowfn = optionsState.nowfn
 	}
 
-	// set expected AAGUID
-	if len(optionsState.environments) == 0 {
-		att.expectedAAGUIDs = []Environment{AAGUIDProd}
-	} else {
-		att.expectedAAGUIDs = optionsState.environments
-	}
-
-	// determine bundle id hash
-	if len(bundleIDHashes) == 0 {
-		return nil, fmt.Errorf("bundle id hash must be provided")
-	} else {
-		att.expectedBundleIDHashes = bundleIDHashes
-	}
-
 	return att, nil
 }
 
-func (at *AttestorImpl) Attest(in *AttestInput) (AttestOutput, error) {
-	subtleIn := SubtleAttestInput{
-		AttestationInput: in,
+type VerifyAttestationInput struct {
+	ServerChallenge []byte
+	AttestationCBOR []byte
+	KeyIdentifier   []byte
 
-		BundleIDHashes:  at.expectedBundleIDHashes,
-		Time:            at.nowfn(),
-		ExpectedAAGUIDs: at.expectedAAGUIDs,
-		AARoots:         at.aaroots,
+	OutAuthenticatorData *authenticatordata.T
+}
+
+func (at *AttestorImpl) VerifyAttestation(in *VerifyAttestationInput) (VerifyAttestationOutput, error) {
+	subtleIn := VerifyAttestationInputStateless{
+		AttestationInput: in,
+		Time:             at.nowfn(),
+		AARoots:          at.aaroots,
 	}
-	return SubtleAttest(&subtleIn)
+	return VerifyAttestationStateless(&subtleIn)
 }

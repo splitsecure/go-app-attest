@@ -21,46 +21,56 @@ const (
 	Format = "apple-appattest"
 )
 
-type SubtleAttestInput struct {
-	AttestationInput *AttestInput
+type VerifyAttestationInputStateless struct {
+	AttestationInput *VerifyAttestationInput
 	Time             time.Time
-	BundleIDHashes   [][]byte
-
-	ExpectedAAGUIDs []Environment
-	AARoots         *x509.CertPool
+	AARoots          *x509.CertPool
 }
 
-// SubtleAttest performs attestation without the guardrails provided by AppAttestImpl.
-func SubtleAttest(in *SubtleAttestInput) (AttestOutput, error) {
+type VerifyAttestationOutput struct {
+	AuthenticatorData *authenticatordata.T
+	LeafCert          *x509.Certificate
+
+	EnvironmentGUID Environment
+	BundleDigest    []byte
+}
+
+// AttestedPubkey returns the key from the leaf certificate
+func (o *VerifyAttestationOutput) AttestedPubkey() *ecdsa.PublicKey {
+	return o.LeafCert.PublicKey.(*ecdsa.PublicKey)
+}
+
+// VerifyAttestationStateless performs attestation without the guardrails provided by AppAttestImpl.
+func VerifyAttestationStateless(in *VerifyAttestationInputStateless) (VerifyAttestationOutput, error) {
 	// unmarshal the attestation object
 	attestObj := AttestationObject{}
 	err := cbor.Unmarshal(in.AttestationInput.AttestationCBOR, &attestObj)
 	if err != nil {
-		return AttestOutput{}, fmt.Errorf("unmarshalling attestation object: %w", err)
+		return VerifyAttestationOutput{}, fmt.Errorf("unmarshalling attestation object: %w", err)
 	}
 
 	// ensure format is correct
 	if attestObj.Format != Format {
-		return AttestOutput{}, fmt.Errorf("attestation object format mismatch: expected '%s', got '%s'", Format, attestObj.Format)
+		return VerifyAttestationOutput{}, fmt.Errorf("attestation object format mismatch: expected '%s', got '%s'", Format, attestObj.Format)
 	}
 
 	// create a new cert verifier using the intermediates provided in the attestation object
 	verifyOpts := x509.VerifyOptions{}
 	if err := populateVerifyOpts(&verifyOpts, &attestObj, in.AARoots); err != nil {
-		return AttestOutput{}, fmt.Errorf("populating verify opts: %w", err)
+		return VerifyAttestationOutput{}, fmt.Errorf("populating verify opts: %w", err)
 	}
 	verifyOpts.CurrentTime = in.Time
 
 	// parse the leaf certificate
 	leafCert, err := x509.ParseCertificate(attestObj.AttestationStatement.X509CertChain[0])
 	if err != nil {
-		return AttestOutput{}, fmt.Errorf("parsing leaf certificate: %w", err)
+		return VerifyAttestationOutput{}, fmt.Errorf("parsing leaf certificate: %w", err)
 	}
 
 	// verify the leaf certificate
 	_, err = leafCert.Verify(verifyOpts)
 	if err != nil {
-		return AttestOutput{}, fmt.Errorf("verifying leaf certificate: %w", err)
+		return VerifyAttestationOutput{}, fmt.Errorf("verifying leaf certificate: %w", err)
 	}
 
 	// > 2. Create clientDataHash as the SHA256 hash of the one-time challenge your server sends
@@ -68,33 +78,33 @@ func SubtleAttest(in *SubtleAttestInput) (AttestOutput, error) {
 	// > and append that hash to the end of the authenticator data (authData from the decoded object).
 	// > 3. Generate a new SHA256 hash of the composite item to create nonce.
 
-	//clientDataHash := sha256.Sum256(in.AttestationInput.ServerChallenge)
+	// clientDataHash := sha256.Sum256(in.AttestationInput.ServerChallenge)
 	clientDataHash := in.AttestationInput.ServerChallenge
 
 	nonce, err := ComputeNonce(attestObj.AuthData, clientDataHash[:])
 	if err != nil {
-		return AttestOutput{}, fmt.Errorf("computing nonce: %w", err)
+		return VerifyAttestationOutput{}, fmt.Errorf("computing nonce: %w", err)
 	}
 
 	nonceFromCert, err := extractNonceFromCert(leafCert)
 	if err != nil {
-		return AttestOutput{}, fmt.Errorf("extracting nonce from leaf certificate: %w", err)
+		return VerifyAttestationOutput{}, fmt.Errorf("extracting nonce from leaf certificate: %w", err)
 	}
 
 	if !bytes.Equal(nonceFromCert, nonce[:]) {
-		return AttestOutput{}, fmt.Errorf("nonce from cert did not match computed nonce: %s != %s", hex.EncodeToString(nonceFromCert), hex.EncodeToString(nonce[:]))
+		return VerifyAttestationOutput{}, fmt.Errorf("nonce from cert did not match computed nonce: %s != %s", hex.EncodeToString(nonceFromCert), hex.EncodeToString(nonce[:]))
 	}
 
 	certPubKey, ok := leafCert.PublicKey.(*ecdsa.PublicKey)
 	if !ok {
-		return AttestOutput{}, fmt.Errorf("downcasting pubkey: unexpected type '%s'", reflect.TypeOf(leafCert.PublicKey))
+		return VerifyAttestationOutput{}, fmt.Errorf("downcasting pubkey: unexpected type '%s'", reflect.TypeOf(leafCert.PublicKey))
 	}
 
 	computedPubkeyHash := ComputeKeyHash(certPubKey)
 
 	// assert that the public key of the leaf certificate matches the key handle returned by the app
 	if !bytes.Equal(in.AttestationInput.KeyIdentifier, computedPubkeyHash[:]) {
-		return AttestOutput{}, fmt.Errorf("key identifier did not match public key of leaf certificate: %s != %s", hex.EncodeToString(computedPubkeyHash[:]), hex.EncodeToString(in.AttestationInput.KeyIdentifier))
+		return VerifyAttestationOutput{}, fmt.Errorf("key identifier did not match public key of leaf certificate: %s != %s", hex.EncodeToString(computedPubkeyHash[:]), hex.EncodeToString(in.AttestationInput.KeyIdentifier))
 	}
 
 	authenticatorData := in.AttestationInput.OutAuthenticatorData
@@ -103,45 +113,24 @@ func SubtleAttest(in *SubtleAttestInput) (AttestOutput, error) {
 	}
 
 	if err = authenticatordata.Unmarshal(attestObj.AuthData, authenticatorData); err != nil {
-		return AttestOutput{}, errors.Wrap(err, "unmarshalling authenticator data")
-	}
-
-	bundleIDHashOk := false
-	for _, bundleIDHash := range in.BundleIDHashes {
-		if bytes.Equal(bundleIDHash, authenticatorData.RelayingPartyHash) {
-			bundleIDHashOk = true
-			break
-		}
-	}
-	if !bundleIDHashOk {
-		return AttestOutput{}, fmt.Errorf("app id hash did not match expected app ids: %q", hex.EncodeToString(authenticatorData.RelayingPartyHash))
-	}
-
-	// ensure that AAGUID is correct
-	aaguidOk := false
-	for _, aaguid := range in.ExpectedAAGUIDs {
-		if bytes.Equal(aaguid, authenticatorData.AttestedCredentialData.AAGUID) {
-			aaguidOk = true
-			break
-		}
-	}
-	if !aaguidOk {
-		return AttestOutput{}, fmt.Errorf("aaguid did not match expected aaguids: %q", hex.EncodeToString(authenticatorData.AttestedCredentialData.AAGUID))
+		return VerifyAttestationOutput{}, errors.Wrap(err, "unmarshalling authenticator data")
 	}
 
 	// > 9. Verify that the authenticator data’s credentialId field is the same as the key identifier.
 	if !bytes.Equal(in.AttestationInput.KeyIdentifier, authenticatorData.AttestedCredentialData.CredentialID) {
-		return AttestOutput{}, fmt.Errorf("key identifier did not match attested credential id of authenticator data")
+		return VerifyAttestationOutput{}, fmt.Errorf("key identifier did not match attested credential id of authenticator data")
 	}
 
-	return AttestOutput{
+	return VerifyAttestationOutput{
 		AuthenticatorData: authenticatorData,
 		LeafCert:          leafCert,
+
+		EnvironmentGUID: authenticatorData.AttestedCredentialData.AAGUID,
+		BundleDigest:    authenticatorData.RelayingPartyHash,
 	}, nil
 }
 
 func populateVerifyOpts(dst *x509.VerifyOptions, attObj *AttestationObject, aaroots *x509.CertPool) (err error) {
-
 	if len(attObj.AttestationStatement.X509CertChain) < 1 {
 		return errors.New("expected at least one certificate in x509 cert chain")
 	}

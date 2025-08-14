@@ -41,7 +41,6 @@ type AttestOutput struct {
 }
 
 func AttestKey(input *AttestInput) (AttestOutput, error) {
-
 	// compute the key hash
 	keyIdentifier := appattest.ComputeKeyHash(input.AttestedKey)
 
@@ -65,7 +64,7 @@ func AttestKey(input *AttestInput) (AttestOutput, error) {
 
 	// compute rawnonce which will be put in an ASN.1 container
 	rawnonce, err := appattest.ComputeNonce(adb, input.ServerChallenge)
-	//rawnonce, err := appattest.ComputeNonce(adb, serverChallengeDigest[:])
+	// rawnonce, err := appattest.ComputeNonce(adb, serverChallengeDigest[:])
 	if err != nil {
 		return AttestOutput{}, err
 	}

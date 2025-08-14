@@ -23,7 +23,7 @@ type MintContext struct {
 }
 
 func (mc *MintContext) DumpToDir(p string) error {
-	err := os.MkdirAll(p, 0700)
+	err := os.MkdirAll(p, 0o700)
 	if err != nil && !errors.Is(err, os.ErrExist) {
 		return err
 	}
@@ -33,7 +33,7 @@ func (mc *MintContext) DumpToDir(p string) error {
 		Type:  "CERTIFICATE",
 	}
 
-	if err := os.WriteFile(filepath.Join(p, "ca.crt"), pem.EncodeToMemory(&blk), 0755); err != nil {
+	if err := os.WriteFile(filepath.Join(p, "ca.crt"), pem.EncodeToMemory(&blk), 0o755); err != nil {
 		return err
 	}
 
@@ -45,7 +45,7 @@ func (mc *MintContext) DumpToDir(p string) error {
 		Bytes: cakeybuf,
 		Type:  "EC PRIVATE KEY",
 	}
-	if err := os.WriteFile(filepath.Join(p, "ca.key"), pem.EncodeToMemory(&blk), 0755); err != nil {
+	if err := os.WriteFile(filepath.Join(p, "ca.key"), pem.EncodeToMemory(&blk), 0o755); err != nil {
 		return err
 	}
 
@@ -53,7 +53,7 @@ func (mc *MintContext) DumpToDir(p string) error {
 		Bytes: mc.IntCertDer,
 		Type:  "CERTIFICATE",
 	}
-	if err := os.WriteFile(filepath.Join(p, "int.crt"), pem.EncodeToMemory(&blk), 0755); err != nil {
+	if err := os.WriteFile(filepath.Join(p, "int.crt"), pem.EncodeToMemory(&blk), 0o755); err != nil {
 		return err
 	}
 
@@ -65,7 +65,7 @@ func (mc *MintContext) DumpToDir(p string) error {
 		Bytes: intkeybuf,
 		Type:  "EC PRIVATE KEY",
 	}
-	if err := os.WriteFile(filepath.Join(p, "int.key"), pem.EncodeToMemory(&blk), 0755); err != nil {
+	if err := os.WriteFile(filepath.Join(p, "int.key"), pem.EncodeToMemory(&blk), 0o755); err != nil {
 		return err
 	}
 
@@ -73,7 +73,6 @@ func (mc *MintContext) DumpToDir(p string) error {
 }
 
 func NewMintContext() (*MintContext, error) {
-
 	cader, capriv, err := generateCACert("SplitSecure Apple App Attest Dev/Mock CA")
 	if err != nil {
 		return nil, err

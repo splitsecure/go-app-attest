@@ -41,7 +41,6 @@ func Marshal(ad *T) ([]byte, error) {
 }
 
 func marshalAttestedCredentialData(acd *AttestedCredentialData, dst *[]byte) error {
-
 	// Serialize AAGUID (must be 16 bytes)
 	if len(acd.AAGUID) != 16 {
 		return fmt.Errorf("AAGUID must be 16 bytes")

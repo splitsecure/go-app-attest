@@ -22,13 +22,11 @@ func TestAppAttest(t *testing.T) {
 	}
 
 	// create an attestor
-	appIDHash, err := base64.StdEncoding.AppendDecode(nil, []byte("FVhAM8lQuf6dUUziohGjJtcaprEBSrTG+i+9qdmqGKY="))
+	bundleDigest, err := base64.StdEncoding.AppendDecode(nil, []byte("FVhAM8lQuf6dUUziohGjJtcaprEBSrTG+i+9qdmqGKY="))
 	require.NoError(t, err)
 
 	attestor, err := appattest.New(
-		[][]byte{appIDHash},
 		appattest.WithNowFn(nowFn),
-		appattest.WithEnvironments([]appattest.Environment{appattest.AAGUIDProd}),
 	)
 	require.NoError(t, err)
 
@@ -40,15 +38,17 @@ func TestAppAttest(t *testing.T) {
 	keyIdentifier, err := base64.StdEncoding.AppendDecode(nil, []byte("bSrEhF8TIzIvWSPwvZ0i2+UOBre4ASH84rK15m6emNY="))
 	require.NoError(t, err)
 
-	req := appattest.AttestInput{
+	req := appattest.VerifyAttestationInput{
 		ServerChallenge: []byte("test_server_challenge"),
 		AttestationCBOR: attestationCBOR,
 		KeyIdentifier:   keyIdentifier,
 	}
 
-	res, err := attestor.Attest(&req)
+	res, err := attestor.VerifyAttestation(&req)
 	require.NoError(t, err)
 	assert.Equal(t, uint32(0), res.AuthenticatorData.SignCount)
+	require.Equal(t, bundleDigest, res.BundleDigest)
+	require.Equal(t, appattest.AAGUIDProd, res.EnvironmentGUID)
 }
 
 func TestAppAttestDev(t *testing.T) {
@@ -61,13 +61,11 @@ func TestAppAttestDev(t *testing.T) {
 	}
 
 	// pre-hash has the following shape: ABC6DEF.com.example.fooapp
-	bundleIDHash, err := base64.StdEncoding.AppendDecode(nil, []byte("FcoOH+2hZbXEsTrH0Orwx24jatXg6mk7q+38tfqkUbg="))
+	bundleDigest, err := base64.StdEncoding.AppendDecode(nil, []byte("FcoOH+2hZbXEsTrH0Orwx24jatXg6mk7q+38tfqkUbg="))
 	require.NoError(t, err)
 
 	attestor, err := appattest.New(
-		[][]byte{bundleIDHash},
 		appattest.WithNowFn(nowFn),
-		appattest.WithEnvironments([]appattest.Environment{appattest.AAGUIDDev}),
 	)
 	require.NoError(t, err)
 
@@ -80,15 +78,17 @@ func TestAppAttestDev(t *testing.T) {
 	require.NoError(t, err)
 
 	chalSum := sha256.Sum256([]byte("server_challenge"))
-	req := appattest.AttestInput{
+	req := appattest.VerifyAttestationInput{
 		ServerChallenge: chalSum[:],
 		AttestationCBOR: attestationCBOR,
 		KeyIdentifier:   keyIdentifier,
 	}
 
-	res, err := attestor.Attest(&req)
+	res, err := attestor.VerifyAttestation(&req)
 	require.NoError(t, err)
 	assert.Equal(t, uint32(0), res.AuthenticatorData.SignCount)
+	assert.Equal(t, bundleDigest, res.BundleDigest)
+	assert.Equal(t, appattest.AAGUIDDev, res.EnvironmentGUID)
 }
 
 func FuzzAttestationData(f *testing.F) {
@@ -113,14 +113,8 @@ func FuzzAttestationData(f *testing.F) {
 		return t
 	}
 
-	// pre-hash has the following shape: ABC6DEF.com.example.fooapp
-	bundleIDHash, err := base64.StdEncoding.AppendDecode(nil, []byte("FcoOH+2hZbXEsTrH0Orwx24jatXg6mk7q+38tfqkUbg="))
-	require.NoError(f, err)
-
 	attestor, err := appattest.New(
-		[][]byte{bundleIDHash},
 		appattest.WithNowFn(nowFn),
-		appattest.WithEnvironments([]appattest.Environment{appattest.AAGUIDDev}),
 	)
 	require.NoError(f, err)
 
@@ -129,7 +123,7 @@ func FuzzAttestationData(f *testing.F) {
 	require.NoError(f, err)
 
 	out := authenticatordata.T{}
-	req := appattest.AttestInput{
+	req := appattest.VerifyAttestationInput{
 		ServerChallenge:      chalSum[:],
 		KeyIdentifier:        keyIdentifier,
 		OutAuthenticatorData: &out,
@@ -138,7 +132,7 @@ func FuzzAttestationData(f *testing.F) {
 	f.Fuzz(func(t *testing.T, attestorData []byte) {
 		req.AttestationCBOR = attestorData // fuzzer will provide the input
 		startTime := time.Now()
-		_, _ = attestor.Attest(&req)
+		_, _ = attestor.VerifyAttestation(&req)
 
 		// verifying should be a relatively fast operation
 		if time.Since(startTime) > 100*time.Millisecond {

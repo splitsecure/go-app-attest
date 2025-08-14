@@ -13,7 +13,7 @@ import (
 )
 
 func TestAssertionRoundtrip(t *testing.T) {
-	appIDDigest := sha256.Sum256([]byte("myapp"))
+	bundleHash := sha256.Sum256([]byte("myapp"))
 	attKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	require.NoError(t, err)
 
@@ -22,20 +22,20 @@ func TestAssertionRoundtrip(t *testing.T) {
 	mao, err := mint.GenerateAssertion(&mint.AssertInput{
 		PrivateKey:      attKey,
 		ClientData:      clientData,
-		ClientAppIDHash: appIDDigest[:],
+		ClientAppIDHash: bundleHash[:],
 		SignCount:       4,
 	})
 	require.NoError(t, err)
 
-	res, err := appattest.Assert(
-		&appattest.AssertInput{
+	res, err := appattest.VerifyAssertion(
+		&appattest.VerifyAssertionInput{
 			Pubkey:           &attKey.PublicKey,
 			Assertion:        mao.Assertion,
 			ClientDataSHA256: clientData,
-			AppIDDigests:     [][]byte{appIDDigest[:]},
 		},
 	)
 
 	require.NoError(t, err)
 	require.Equal(t, uint32(4), res.SignCount)
+	require.Equal(t, bundleHash[:], res.BundleHash)
 }

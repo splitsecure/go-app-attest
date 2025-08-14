@@ -5,21 +5,20 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
-	"slices"
 
 	"github.com/fxamacker/cbor/v2"
 	"github.com/predicat-inc/go-app-attest/authenticatordata"
 )
 
-type AssertInput struct {
+type VerifyAssertionInput struct {
 	Pubkey           *ecdsa.PublicKey
 	Assertion        []byte
 	ClientDataSHA256 []byte
-	AppIDDigests     [][]byte
 }
 
-type AssertOutput struct {
-	SignCount uint32
+type VerifyAssertionOutput struct {
+	SignCount  uint32
+	BundleHash []byte
 }
 
 type AssertionObject struct {
@@ -28,12 +27,12 @@ type AssertionObject struct {
 }
 
 // https://developer.apple.com/documentation/devicecheck/validating-apps-that-connect-to-your-server#Verify-the-assertion
-func Assert(
-	input *AssertInput,
-) (AssertOutput, error) {
+func VerifyAssertion(
+	input *VerifyAssertionInput,
+) (VerifyAssertionOutput, error) {
 	ao := AssertionObject{}
 	if err := cbor.Unmarshal(input.Assertion, &ao); err != nil {
-		return AssertOutput{}, fmt.Errorf("failed to unmarshal assertion object: %w", err)
+		return VerifyAssertionOutput{}, fmt.Errorf("failed to unmarshal assertion object: %w", err)
 	}
 
 	nonceDigester := sha256.New()
@@ -48,22 +47,14 @@ func Assert(
 	nonce = sha256.Sum256(nonce[:])
 
 	if !ecdsa.VerifyASN1(input.Pubkey, nonce[:], ao.Signature) {
-		return AssertOutput{}, fmt.Errorf("failed to verify signature: nonce=%s sig=%s", hex.EncodeToString(nonce[:]), hex.EncodeToString(ao.Signature))
+		return VerifyAssertionOutput{}, fmt.Errorf("failed to verify signature: nonce=%s sig=%s", hex.EncodeToString(nonce[:]), hex.EncodeToString(ao.Signature))
 	}
 
 	ad := authenticatordata.T{}
 	authenticatordata.UnmarshalFromAssertion(ao.AuthenticatorData, &ad)
 
-	appidhashOk := false
-	for _, aid := range input.AppIDDigests {
-		if slices.Equal(ad.RelayingPartyHash, aid) {
-			appidhashOk = true
-			break
-		}
-	}
-	if !appidhashOk {
-		return AssertOutput{}, fmt.Errorf("invalid relaying party %q", hex.EncodeToString(ad.RelayingPartyHash))
-	}
-
-	return AssertOutput{SignCount: ad.SignCount}, nil
+	return VerifyAssertionOutput{
+		SignCount:  ad.SignCount,
+		BundleHash: ad.RelayingPartyHash,
+	}, nil
 }
