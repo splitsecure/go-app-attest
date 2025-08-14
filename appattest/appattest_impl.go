@@ -33,14 +33,8 @@ type AttestorImpl struct {
 }
 
 type optionsState struct {
-	into *AttestorImpl
-
-	aaroots      *x509.CertPool
-	nowfn        func() time.Time
-	bundleIDHash []byte
-
-	// defaults to prod
-	environments []Environment
+	aaroots *x509.CertPool
+	nowfn   func() time.Time
 }
 
 type option struct {

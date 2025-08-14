@@ -124,6 +124,9 @@ func generateCACert(commonName string) ([]byte, *ecdsa.PrivateKey, error) {
 	}
 
 	priv, err := x509.MarshalECPrivateKey(key)
+	if err != nil {
+		panic(err)
+	}
 	pemBlock = &pem.Block{
 		Type:  "EC PRIVATE KEY",
 		Bytes: priv,
