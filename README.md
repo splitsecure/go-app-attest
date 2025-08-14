@@ -14,7 +14,7 @@ go-app-attest is a Go package for implementing Apple App Attestation. This libra
 To install go-app-attest, use the following command:
 
 ```bash
-go get github.com/predicat-inc/go-app-attest
+go get github.com/splitsecure/go-app-attest
 ```
 
 ## Usage
@@ -29,16 +29,13 @@ import (
 	"fmt"
 	"log"
 
-	appattest "github.com/predicat-inc/go-app-attest"
+	appattest "github.com/splitsecure/go-app-attest"
 )
 
 func main() {
 	// Create an attestor
-	bundleIDHash := sha256.Sum256([]byte("ABC6DEF.com.example.my.bundleid"))
-	attestor, err := appattest.New(
-		appattest.WithBundleIDHash(bundleIDHash[:]),
-		appattest.WithEnvironment(appattest.EnvironmentProd),
-	)
+	bundleDigest := sha256.Sum256([]byte("ABC6DEF.com.example.my.bundleid"))
+	attestor, err := appattest.New()
 	if err != nil {
 		log.Fatalf("creating attestor: %v", err)
 	}
@@ -56,6 +53,15 @@ func main() {
 		log.Fatalf("attestation: %v", res.Err)
 	}
 
+	// Verify provenance
+	if !bytes.Equal(res.EnvironmentGUID, appattest.AAGUIDProd) {
+		log.Fatalf("attestation: issuer is not App Attest Prod")
+	}
+
+	if !bytes.Equal(res.BundleDigest, bundleDigest[:]) {
+		log.Fatalf("attestation: attested bundle differs from the expected one")
+	}
+
 	fmt.Printf("Attestation successful. Sign count: %d\n", res.AuthenticatorData.SignCount)
 }
 ```
@@ -64,11 +70,8 @@ func main() {
 
 The `New` function accepts several configuration options:
 
-- `WithBundleIDHash(hash)`: Set the expected bundle ID hash (required)
-- `WithEnvironment(env)`: Set the environment (Production or Development) (default: Production)
 - `WithAppAttestRoots(pool)`: Provide custom certificate roots (default: Apple AppAttest root certificates)
 - `WithNowFn(fn)`: Provide a custom time function (default: time.Now)
-- `WithConstructInto(*attestor)`: Construct the attestor into an existing zero struct (default: nil)
 
 ## Testing
 
