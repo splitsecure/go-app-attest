@@ -46,19 +46,16 @@ func TestMint(t *testing.T) {
 
 	keyid := appattest.ComputeKeyHash(&attKey.PublicKey)
 
-	caPool := x509.NewCertPool()
-	caPool.AddCert(caCert)
-
-	attverif, err := appattest.VerifyAttestationStateless(&appattest.VerifyAttestationInputStateless{
+	attverif, err := appattest.VerifyAttestationPure(&appattest.VerifyAttestationInputPure{
 		AttestationInput: &appattest.VerifyAttestationInput{
 			ServerChallenge: []byte("server data"),
 			AttestationCBOR: mintout.Attestation,
-			KeyIdentifier:   keyid[:],
 		},
 		Time:    time.Now(),
-		AARoots: caPool,
+		AARoots: []*x509.Certificate{caCert},
 	})
 	require.NoError(t, err)
 	require.Equal(t, appIDDigest[:], attverif.BundleDigest)
 	require.Equal(t, appattest.AAGUIDDev, attverif.EnvironmentGUID)
+	require.Equal(t, keyid[:], attverif.KeyID)
 }

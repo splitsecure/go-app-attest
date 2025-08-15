@@ -62,6 +62,19 @@ func main() {
 		log.Fatalf("attestation: attested bundle differs from the expected one")
 	}
 
+	// Verify validity instant
+	instant := time.Now()
+	if !(instant.After(res.LeafCert.NotBefore) && instant.Before(res.LeafCert.NotAfter)) {
+		log.Fatalf("attestation: not valid at expected time")
+	}
+
+	// (optional) verify the key id of the signer
+	expectedKeyID := []byte("myexpectedkeyid")
+	if !bytes.Equal(expectedKeyID, res.KeyID) {
+		log.Fatalf("attestation: unexpected signer id ")
+	}
+
+
 	fmt.Printf("Attestation successful. Sign count: %d\n", res.AuthenticatorData.SignCount)
 }
 ```
