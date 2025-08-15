@@ -7,7 +7,9 @@ import (
 	"crypto/x509"
 	"encoding/asn1"
 	"encoding/hex"
+	"encoding/pem"
 	"fmt"
+	"os"
 	"reflect"
 	"slices"
 	"time"
@@ -21,10 +23,10 @@ const (
 	Format = "apple-appattest"
 )
 
-type VerifyAttestationInputStateless struct {
+type VerifyAttestationInputPure struct {
 	AttestationInput *VerifyAttestationInput
 	Time             time.Time
-	AARoots          *x509.CertPool
+	AARoots          []*x509.Certificate
 }
 
 type VerifyAttestationOutput struct {
@@ -33,6 +35,9 @@ type VerifyAttestationOutput struct {
 
 	EnvironmentGUID Environment
 	BundleDigest    []byte
+
+	NotBefore time.Time
+	NotAfter  time.Time
 }
 
 // AttestedPubkey returns the key from the leaf certificate
@@ -40,8 +45,8 @@ func (o *VerifyAttestationOutput) AttestedPubkey() *ecdsa.PublicKey {
 	return o.LeafCert.PublicKey.(*ecdsa.PublicKey)
 }
 
-// VerifyAttestationStateless performs attestation without the guardrails provided by AppAttestImpl.
-func VerifyAttestationStateless(in *VerifyAttestationInputStateless) (VerifyAttestationOutput, error) {
+// VerifyAttestationPure performs attestation without the guardrails provided by AppAttestImpl.
+func VerifyAttestationPure(in *VerifyAttestationInputPure) (VerifyAttestationOutput, error) {
 	// unmarshal the attestation object
 	attestObj := AttestationObject{}
 	err := cbor.Unmarshal(in.AttestationInput.AttestationCBOR, &attestObj)
@@ -54,24 +59,31 @@ func VerifyAttestationStateless(in *VerifyAttestationInputStateless) (VerifyAtte
 		return VerifyAttestationOutput{}, fmt.Errorf("attestation object format mismatch: expected '%s', got '%s'", Format, attestObj.Format)
 	}
 
-	// create a new cert verifier using the intermediates provided in the attestation object
-	verifyOpts := x509.VerifyOptions{}
-	if err := populateVerifyOpts(&verifyOpts, &attestObj, in.AARoots); err != nil {
-		return VerifyAttestationOutput{}, fmt.Errorf("populating verify opts: %w", err)
-	}
-	verifyOpts.CurrentTime = in.Time
-
-	// parse the leaf certificate
-	leafCert, err := x509.ParseCertificate(attestObj.AttestationStatement.X509CertChain[0])
-	if err != nil {
-		return VerifyAttestationOutput{}, fmt.Errorf("parsing leaf certificate: %w", err)
+	// Parse certificate chain from bytes to certificates
+	chain := make([]*x509.Certificate, len(attestObj.AttestationStatement.X509CertChain))
+	for i, certBytes := range attestObj.AttestationStatement.X509CertChain {
+		cert, err := x509.ParseCertificate(certBytes)
+		if err != nil {
+			return VerifyAttestationOutput{}, fmt.Errorf("parsing certificate at index %d: %w", i, err)
+		}
+		chain[i] = cert
 	}
 
-	// verify the leaf certificate
-	_, err = leafCert.Verify(verifyOpts)
+	result, err := VerifyChain(chain, in.AARoots)
 	if err != nil {
-		return VerifyAttestationOutput{}, fmt.Errorf("verifying leaf certificate: %w", err)
+		return VerifyAttestationOutput{}, fmt.Errorf("verifying certificate chain: %w", err)
 	}
+
+	// get the leaf certificate (first in chain)
+	leafCert := chain[0]
+	pblock := pem.Block{
+		Type:  "CERTIFICATE",
+		Bytes: leafCert.Raw,
+	}
+	if err := pem.Encode(os.Stdout, &pblock); err != nil {
+		panic(err)
+	}
+	fmt.Println()
 
 	// > 2. Create clientDataHash as the SHA256 hash of the one-time challenge your server sends
 	// > to your app before performing the attestation,
@@ -127,27 +139,10 @@ func VerifyAttestationStateless(in *VerifyAttestationInputStateless) (VerifyAtte
 
 		EnvironmentGUID: authenticatorData.AttestedCredentialData.AAGUID,
 		BundleDigest:    authenticatorData.RelayingPartyHash,
+
+		NotBefore: result.NotBefore,
+		NotAfter:  result.NotAfter,
 	}, nil
-}
-
-func populateVerifyOpts(dst *x509.VerifyOptions, attObj *AttestationObject, aaroots *x509.CertPool) (err error) {
-	if len(attObj.AttestationStatement.X509CertChain) < 1 {
-		return errors.New("expected at least one certificate in x509 cert chain")
-	}
-
-	// set the intermediates
-	dst.Intermediates = x509.NewCertPool()
-	// skip the first element, it's the leaf certificate
-	for _, inter := range attObj.AttestationStatement.X509CertChain[1:] {
-		cert, err := x509.ParseCertificate(inter)
-		if err != nil {
-			return errors.Wrap(err, "parsing intermediate")
-		}
-		dst.Intermediates.AddCert(cert)
-		dst.Roots = aaroots
-	}
-
-	return nil
 }
 
 func extractNonceFromCert(c *x509.Certificate) ([]byte, error) {
