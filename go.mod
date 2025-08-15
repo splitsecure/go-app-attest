@@ -1,4 +1,4 @@
-module github.com/predicat-inc/go-app-attest
+module github.com/splitsecure/go-app-attest
 
 go 1.23.0
 

@@ -7,7 +7,7 @@ import (
 	"fmt"
 
 	"github.com/fxamacker/cbor/v2"
-	"github.com/predicat-inc/go-app-attest/authenticatordata"
+	"github.com/splitsecure/go-app-attest/authenticatordata"
 )
 
 type VerifyAssertionInput struct {

@@ -7,8 +7,8 @@ import (
 	"crypto/sha256"
 	"testing"
 
-	"github.com/predicat-inc/go-app-attest/appattest"
-	"github.com/predicat-inc/go-app-attest/mint"
+	"github.com/splitsecure/go-app-attest/appattest"
+	"github.com/splitsecure/go-app-attest/mint"
 	"github.com/stretchr/testify/require"
 )
 

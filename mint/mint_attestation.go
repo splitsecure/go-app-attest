@@ -10,8 +10,8 @@ import (
 	"time"
 
 	"github.com/fxamacker/cbor/v2"
-	"github.com/predicat-inc/go-app-attest/appattest"
-	"github.com/predicat-inc/go-app-attest/authenticatordata"
+	"github.com/splitsecure/go-app-attest/appattest"
+	"github.com/splitsecure/go-app-attest/authenticatordata"
 )
 
 // This package provides an API for minting attestation documents.

@@ -14,7 +14,7 @@ import (
 
 	"github.com/fxamacker/cbor/v2"
 	"github.com/pkg/errors"
-	"github.com/predicat-inc/go-app-attest/authenticatordata"
+	"github.com/splitsecure/go-app-attest/authenticatordata"
 )
 
 const (

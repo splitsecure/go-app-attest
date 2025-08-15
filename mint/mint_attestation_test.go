@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
-	appattest "github.com/predicat-inc/go-app-attest/appattest"
-	"github.com/predicat-inc/go-app-attest/mint"
+	appattest "github.com/splitsecure/go-app-attest/appattest"
+	"github.com/splitsecure/go-app-attest/mint"
 	"github.com/stretchr/testify/require"
 )
 

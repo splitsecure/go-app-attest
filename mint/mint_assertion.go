@@ -8,8 +8,8 @@ import (
 	"fmt"
 
 	"github.com/fxamacker/cbor/v2"
-	"github.com/predicat-inc/go-app-attest/appattest"
-	"github.com/predicat-inc/go-app-attest/authenticatordata"
+	"github.com/splitsecure/go-app-attest/appattest"
+	"github.com/splitsecure/go-app-attest/authenticatordata"
 )
 
 type AssertInput struct {

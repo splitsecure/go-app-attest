@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/predicat-inc/go-app-attest/appattest"
-	"github.com/predicat-inc/go-app-attest/authenticatordata"
+	"github.com/splitsecure/go-app-attest/appattest"
+	"github.com/splitsecure/go-app-attest/authenticatordata"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
