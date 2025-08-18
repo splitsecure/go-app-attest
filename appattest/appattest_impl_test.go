@@ -13,21 +13,11 @@ import (
 )
 
 func TestAppAttest(t *testing.T) {
-	nowFn := func() time.Time {
-		t, err := time.Parse(time.DateOnly, "2024-04-18")
-		if err != nil {
-			panic(err)
-		}
-		return t
-	}
-
 	// create an attestor
 	bundleDigest, err := base64.StdEncoding.AppendDecode(nil, []byte("FVhAM8lQuf6dUUziohGjJtcaprEBSrTG+i+9qdmqGKY="))
 	require.NoError(t, err)
 
-	attestor, err := appattest.New(
-		appattest.WithNowFn(nowFn),
-	)
+	attestor, err := appattest.New()
 	require.NoError(t, err)
 
 	// deserialize the sample case
@@ -41,7 +31,6 @@ func TestAppAttest(t *testing.T) {
 	req := appattest.VerifyAttestationInput{
 		ServerChallenge: []byte("test_server_challenge"),
 		AttestationCBOR: attestationCBOR,
-		KeyIdentifier:   keyIdentifier,
 	}
 
 	res, err := attestor.VerifyAttestation(&req)
@@ -49,24 +38,19 @@ func TestAppAttest(t *testing.T) {
 	assert.Equal(t, uint32(0), res.AuthenticatorData.SignCount)
 	require.Equal(t, bundleDigest, res.BundleDigest)
 	require.Equal(t, appattest.AAGUIDProd, res.EnvironmentGUID)
+
+	validInstant := time.Date(2024, 4, 18, 0, 0, 0, 0, time.UTC)
+	assert.True(t, validInstant.Before(res.LeafCert.NotAfter))
+	assert.True(t, validInstant.After(res.LeafCert.NotBefore))
+	assert.Equal(t, keyIdentifier, res.KeyID)
 }
 
 func TestAppAttestDev(t *testing.T) {
-	nowFn := func() time.Time {
-		t, err := time.Parse(time.DateOnly, "2024-09-05")
-		if err != nil {
-			panic(err)
-		}
-		return t
-	}
-
 	// pre-hash has the following shape: ABC6DEF.com.example.fooapp
 	bundleDigest, err := base64.StdEncoding.AppendDecode(nil, []byte("FcoOH+2hZbXEsTrH0Orwx24jatXg6mk7q+38tfqkUbg="))
 	require.NoError(t, err)
 
-	attestor, err := appattest.New(
-		appattest.WithNowFn(nowFn),
-	)
+	attestor, err := appattest.New()
 	require.NoError(t, err)
 
 	// deserialize the sample case
@@ -81,7 +65,6 @@ func TestAppAttestDev(t *testing.T) {
 	req := appattest.VerifyAttestationInput{
 		ServerChallenge: chalSum[:],
 		AttestationCBOR: attestationCBOR,
-		KeyIdentifier:   keyIdentifier,
 	}
 
 	res, err := attestor.VerifyAttestation(&req)
@@ -89,6 +72,10 @@ func TestAppAttestDev(t *testing.T) {
 	assert.Equal(t, uint32(0), res.AuthenticatorData.SignCount)
 	assert.Equal(t, bundleDigest, res.BundleDigest)
 	assert.Equal(t, appattest.AAGUIDDev, res.EnvironmentGUID)
+	validInstant := time.Date(2025, 4, 5, 0, 0, 0, 0, time.UTC)
+	assert.True(t, validInstant.Before(res.LeafCert.NotAfter))
+	assert.True(t, validInstant.After(res.LeafCert.NotBefore))
+	assert.Equal(t, keyIdentifier, res.KeyID)
 }
 
 func FuzzAttestationData(f *testing.F) {
@@ -104,28 +91,15 @@ func FuzzAttestationData(f *testing.F) {
 		f.Add(tc) // Use f.Add to provide a seed corpus
 	}
 
-	// prepare an attestor
-	nowFn := func() time.Time {
-		t, err := time.Parse(time.DateOnly, "2024-09-05")
-		if err != nil {
-			panic(err)
-		}
-		return t
-	}
-
-	attestor, err := appattest.New(
-		appattest.WithNowFn(nowFn),
-	)
+	attestor, err := appattest.New()
 	require.NoError(f, err)
 
 	chalSum := sha256.Sum256([]byte("server_challenge"))
-	keyIdentifier, err := base64.StdEncoding.AppendDecode(nil, []byte("B3hMn1CG/4of7s+TUkKLrS/6FAxsGft2N6PJhrzXI4E="))
 	require.NoError(f, err)
 
 	out := authenticatordata.T{}
 	req := appattest.VerifyAttestationInput{
 		ServerChallenge:      chalSum[:],
-		KeyIdentifier:        keyIdentifier,
 		OutAuthenticatorData: &out,
 	}
 

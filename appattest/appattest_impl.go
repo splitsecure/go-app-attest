@@ -2,7 +2,8 @@ package appattest
 
 import (
 	"crypto/x509"
-	"time"
+	"encoding/pem"
+	"fmt"
 
 	"github.com/pkg/errors"
 	"github.com/splitsecure/go-app-attest/authenticatordata"
@@ -28,13 +29,11 @@ type Attestor interface {
 }
 
 type AttestorImpl struct {
-	aaroots *x509.CertPool
-	nowfn   func() time.Time
+	aaroots []*x509.Certificate
 }
 
 type optionsState struct {
-	aaroots *x509.CertPool
-	nowfn   func() time.Time
+	aaroots []*x509.Certificate
 }
 
 type option struct {
@@ -47,17 +46,10 @@ func newoption(fn func(*optionsState)) option {
 	}
 }
 
-// WithAppAttestRoots lets the user provide its own authoritative certs pool
-func WithAppAttestRoots(pool *x509.CertPool) option {
+// WithAppAttestRoots lets the user provide its own authoritative certificates
+func WithAppAttestRoots(certs []*x509.Certificate) option {
 	return newoption(func(s *optionsState) {
-		s.aaroots = pool
-	})
-}
-
-// WithNowFn lets the user provide its own time.Now function
-func WithNowFn(now func() time.Time) option {
-	return newoption(func(os *optionsState) {
-		os.nowfn = now
+		s.aaroots = certs
 	})
 }
 
@@ -73,23 +65,21 @@ func New(
 		option.apply(&optionsState)
 	}
 
-	// determine pool
+	// determine root certificates
 	if optionsState.aaroots == nil {
 		// use the certificate provided by the library
-		att.aaroots = x509.NewCertPool()
-		if !att.aaroots.AppendCertsFromPEM([]byte(appattestRootCAPEM)) {
-			return nil, errors.New("loading library provided app attest ca")
+		block, _ := pem.Decode([]byte(appattestRootCAPEM))
+		if block == nil {
+			return nil, errors.New("failed to parse app attest root CA PEM")
 		}
+		cert, err := x509.ParseCertificate(block.Bytes)
+		if err != nil {
+			return nil, fmt.Errorf("parsing app attest root CA: %w", err)
+		}
+		att.aaroots = []*x509.Certificate{cert}
 	} else {
-		// use the user provided pool
+		// use the user provided certificates
 		att.aaroots = optionsState.aaroots
-	}
-
-	// determine timefn
-	if optionsState.nowfn == nil {
-		att.nowfn = time.Now
-	} else {
-		att.nowfn = optionsState.nowfn
 	}
 
 	return att, nil
@@ -98,16 +88,14 @@ func New(
 type VerifyAttestationInput struct {
 	ServerChallenge []byte
 	AttestationCBOR []byte
-	KeyIdentifier   []byte
 
 	OutAuthenticatorData *authenticatordata.T
 }
 
 func (at *AttestorImpl) VerifyAttestation(in *VerifyAttestationInput) (VerifyAttestationOutput, error) {
-	subtleIn := VerifyAttestationInputStateless{
+	subtleIn := VerifyAttestationInputPure{
 		AttestationInput: in,
-		Time:             at.nowfn(),
 		AARoots:          at.aaroots,
 	}
-	return VerifyAttestationStateless(&subtleIn)
+	return VerifyAttestationPure(&subtleIn)
 }
