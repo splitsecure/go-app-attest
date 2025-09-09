@@ -42,7 +42,6 @@ func validateKeyUsage(cert *x509.Certificate, isCA bool) error {
 			return fmt.Errorf("CA certificate missing Certificate Sign key usage")
 		}
 	} else {
-		fmt.Println(cert.KeyUsage)
 		if cert.KeyUsage&x509.KeyUsageDigitalSignature == 0 {
 			return fmt.Errorf("end entity certificate missing required key usage (Digital Signature)")
 		}
