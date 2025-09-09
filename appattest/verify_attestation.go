@@ -7,9 +7,7 @@ import (
 	"crypto/x509"
 	"encoding/asn1"
 	"encoding/hex"
-	"encoding/pem"
 	"fmt"
-	"os"
 	"reflect"
 	"slices"
 	"time"
@@ -81,14 +79,6 @@ func VerifyAttestationPure(in *VerifyAttestationInputPure) (VerifyAttestationOut
 
 	// get the leaf certificate (first in chain)
 	leafCert := chain[0]
-	pblock := pem.Block{
-		Type:  "CERTIFICATE",
-		Bytes: leafCert.Raw,
-	}
-	if err := pem.Encode(os.Stdout, &pblock); err != nil {
-		panic(err)
-	}
-	fmt.Println()
 
 	// > 2. Create clientDataHash as the SHA256 hash of the one-time challenge your server sends
 	// > to your app before performing the attestation,
